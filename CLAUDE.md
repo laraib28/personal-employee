@@ -208,3 +208,10 @@ Wait for consent; never auto-create ADRs. Group related decisions (stacks, authe
 
 ## Code Standards
 See `.specify/memory/constitution.md` for code quality, testing, performance, security, and architecture principles.
+
+## Active Technologies
+- Python 3.11+ + anthropic (Claude API SDK), Jinja2 (template engine), PyYAML (YAML parser), pathlib (file I/O), GitPython (git integration) (001-ai-agent-system)
+- File system (markdown files, YAML front-matter, directory structure per SpecKit Plus conventions) - no database required (001-ai-agent-system)
+
+## Recent Changes
+- 001-ai-agent-system: Added Python 3.11+ + anthropic (Claude API SDK), Jinja2 (template engine), PyYAML (YAML parser), pathlib (file I/O), GitPython (git integration)

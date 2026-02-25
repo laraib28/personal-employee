@@ -1,0 +1,40 @@
+formats:
+  markdown_with_frontmatter:
+    description: Standard format for all generated documents
+    structure:
+      - front_matter: YAML delimited by --- markers
+      - body: Markdown with headings, lists, code blocks
+    validation:
+      - yaml_parseable: true
+      - no_unresolved_placeholders: true
+      - headings_hierarchical: true
+    examples:
+      - spec.md
+      - plan.md
+      - tasks.md
+      - constitution.md
+      - adr/{number}-{slug}.md
+      - phr/{id}-{slug}.{stage}.prompt.md
+
+  checklist_markdown:
+    description: Quality validation checklists
+    structure:
+      - front_matter: YAML with metadata
+      - body: Markdown headings + checkbox lists
+    validation:
+      - all_items_have_status: true (checked or unchecked)
+      - notes_section_present: true
+    examples:
+      - checklists/requirements.md
+
+  contracts_yaml:
+    description: API and validation contracts
+    structure:
+      - pure YAML (no markdown)
+    validation:
+      - yaml_valid: true
+      - all_fields_documented: true
+    examples:
+      - contracts/cli-commands.yaml
+      - contracts/file-formats.yaml
+      - contracts/validation-rules.yaml

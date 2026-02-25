@@ -1,0 +1,103 @@
+commands:
+  - name: /sp.specify
+    description: Generate feature specification from natural language description
+    inputs:
+      - feature_description: string (natural language)
+    outputs:
+      - spec_file: path (specs/{number}-{slug}/spec.md)
+      - checklist_file: path (specs/{number}-{slug}/checklists/requirements.md)
+      - phr_file: path (history/prompts/{feature-name}/{id}-{slug}.spec.prompt.md)
+    preconditions:
+      - constitution_active: boolean
+      - valid_git_repo: boolean
+    postconditions:
+      - spec_exists: boolean
+      - quality_validation_passed: boolean
+      - phr_created: boolean
+    errors:
+      - missing_constitution: "Constitution file not found at .specify/memory/constitution.md"
+      - invalid_feature_description: "Feature description is empty or invalid"
+      - quality_validation_failed: "Specification failed quality checklist"
+
+  - name: /sp.plan
+    description: Generate implementation plan from feature specification
+    inputs:
+      - none (reads from current feature branch spec.md)
+    outputs:
+      - plan_file: path (specs/{feature}/plan.md)
+      - research_file: path (specs/{feature}/research.md)
+      - data_model_file: path (specs/{feature}/data-model.md)
+      - contracts_dir: path (specs/{feature}/contracts/)
+      - quickstart_file: path (specs/{feature}/quickstart.md)
+      - phr_file: path (history/prompts/{feature}/{id}-{slug}.plan.prompt.md)
+    preconditions:
+      - spec_exists: boolean
+      - spec_quality_passed: boolean
+      - constitution_check_passed: boolean
+    postconditions:
+      - plan_complete: boolean
+      - no_needs_clarification: boolean
+      - constitution_recheck_passed: boolean
+      - phr_created: boolean
+    errors:
+      - spec_not_found: "Feature specification not found"
+      - constitution_violation: "Plan violates constitution principle {principle_id}"
+      - unresolved_clarifications: "Technical context has unresolved NEEDS CLARIFICATION markers"
+
+  - name: /sp.tasks
+    description: Generate task list from implementation plan
+    inputs:
+      - none (reads from current feature branch spec.md + plan.md)
+    outputs:
+      - tasks_file: path (specs/{feature}/tasks.md)
+      - phr_file: path (history/prompts/{feature}/{id}-{slug}.tasks.prompt.md)
+    preconditions:
+      - spec_exists: boolean
+      - plan_exists: boolean
+      - plan_research_complete: boolean
+      - plan_design_complete: boolean
+    postconditions:
+      - tasks_grouped_by_story: boolean
+      - dependencies_acyclic: boolean
+      - parallel_markers_added: boolean
+      - phr_created: boolean
+    errors:
+      - plan_not_complete: "Plan has incomplete phases"
+      - circular_dependency: "Task dependency cycle detected: {cycle}"
+
+  - name: /sp.constitution
+    description: Create or update project constitution
+    inputs:
+      - constitution_content: string (principles and governance rules) or file_path
+    outputs:
+      - constitution_file: path (.specify/memory/constitution.md)
+      - sync_impact_report: embedded in constitution file
+      - phr_file: path (history/prompts/constitution/{id}-{slug}.constitution.prompt.md)
+    preconditions:
+      - none (can create from scratch)
+    postconditions:
+      - constitution_active: boolean
+      - version_incremented: boolean
+      - no_unresolved_placeholders: boolean
+      - phr_created: boolean
+    errors:
+      - invalid_version: "Version does not follow semver"
+      - unresolved_placeholders: "Constitution contains unresolved {placeholder}"
+
+  - name: /sp.adr
+    description: Document architectural decision record
+    inputs:
+      - decision_title: string
+      - decision_context: string (optional, inferred from recent work)
+    outputs:
+      - adr_file: path (history/adr/{number}-{slug}.md)
+      - phr_file: path (history/prompts/{feature}/{id}-{slug}.misc.prompt.md)
+    preconditions:
+      - significance_test_passed: boolean (impact + alternatives + scope)
+    postconditions:
+      - adr_created: boolean
+      - alternatives_documented: boolean
+      - phr_created: boolean
+    errors:
+      - significance_test_failed: "Decision does not meet significance criteria"
+      - missing_context: "Cannot infer decision context from workspace"

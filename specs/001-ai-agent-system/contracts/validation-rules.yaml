@@ -1,0 +1,85 @@
+quality_gates:
+  specification:
+    - rule: no_implementation_details
+      check: Content does not mention languages, frameworks, databases, APIs
+      error: "Specification contains implementation detail: {detail}"
+
+    - rule: testable_requirements
+      check: Each functional requirement can be objectively tested
+      error: "Requirement {id} is not testable: {requirement}"
+
+    - rule: measurable_success_criteria
+      check: Success criteria have numeric metrics or objective measures
+      error: "Success criterion {id} lacks measurement: {criterion}"
+
+    - rule: technology_agnostic
+      check: Success criteria describe outcomes, not implementation
+      error: "Success criterion {id} is technology-specific: {criterion}"
+
+    - rule: no_clarification_markers
+      check: No [NEEDS CLARIFICATION] markers remain
+      error: "Unresolved clarification at {location}: {marker}"
+
+  plan:
+    - rule: technical_context_complete
+      check: No NEEDS CLARIFICATION in Technical Context section
+      error: "Technical context incomplete: {field}"
+
+    - rule: constitution_check_passed
+      check: All constitution principles verified, violations justified
+      error: "Constitution violation in {principle}: {violation}"
+
+    - rule: structure_decision_documented
+      check: Project Structure has concrete paths, no Option labels
+      error: "Project structure contains undecided options"
+
+    - rule: research_complete
+      check: research.md exists and all questions answered
+      error: "Research incomplete for: {research_task}"
+
+  tasks:
+    - rule: grouped_by_user_story
+      check: Tasks organized under user story headings
+      error: "Task {id} not grouped under user story"
+
+    - rule: dependencies_acyclic
+      check: Task dependency graph has no cycles
+      error: "Circular dependency detected: {cycle}"
+
+    - rule: parallel_markers
+      check: At least 30% of tasks marked [P] for parallel execution
+      error: "Insufficient parallelization: {percentage}% marked parallel"
+
+    - rule: file_paths_explicit
+      check: Tasks reference exact file paths, not placeholders
+      error: "Task {id} has vague file reference: {reference}"
+
+  constitution:
+    - rule: no_placeholders
+      check: No {{PLACEHOLDER}} or [PLACEHOLDER] tokens remain
+      error: "Unresolved placeholder: {placeholder}"
+
+    - rule: version_valid
+      check: Version follows semver (MAJOR.MINOR.PATCH)
+      error: "Invalid version format: {version}"
+
+    - rule: dates_iso_format
+      check: Dates in YYYY-MM-DD format
+      error: "Invalid date format: {date}"
+
+    - rule: sync_impact_report
+      check: Sync impact report present for all amendments
+      error: "Missing sync impact report for version {version}"
+
+  phr:
+    - rule: prompt_text_complete
+      check: PROMPT_TEXT not truncated, captures full user input
+      error: "PHR {id} has truncated prompt text"
+
+    - rule: all_placeholders_filled
+      check: No {{PLACEHOLDER}} tokens remain in YAML or body
+      error: "PHR {id} has unfilled placeholder: {placeholder}"
+
+    - rule: routing_correct
+      check: File path matches stage routing rules
+      error: "PHR {id} routed incorrectly: {actual_path} should be {expected_path}"
