@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 from retry import with_retry, write_vault_log  # noqa: E402
 
-CREDENTIALS_FILE = REPO_ROOT / "credintials.json.json"
+CREDENTIALS_FILE = REPO_ROOT / "credentials.json"
 TOKEN_FILE = REPO_ROOT / "token.json"
 VAULT_PATH = REPO_ROOT / "obsidian_vault"
 SEEN_IDS_FILE = REPO_ROOT / ".gmail_seen_ids.json"
@@ -66,9 +66,13 @@ def _get_gmail_service():
             creds.refresh(Request())
         else:
             if not CREDENTIALS_FILE.exists():
+                print(
+                    "Download OAuth credentials from Google Cloud Console "
+                    "and place credentials.json in the project root.",
+                    flush=True,
+                )
                 raise FileNotFoundError(
-                    f"Credentials file not found: {CREDENTIALS_FILE}\n"
-                    "Download OAuth2 credentials from Google Cloud Console."
+                    f"credentials.json not found at: {CREDENTIALS_FILE}"
                 )
 
             class _WslBrowser(webbrowser.BaseBrowser):

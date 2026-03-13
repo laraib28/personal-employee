@@ -36,7 +36,7 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-CREDENTIALS_FILE = REPO_ROOT / "credintials.json.json"
+CREDENTIALS_FILE = REPO_ROOT / "credentials.json"
 TOKEN_FILE = REPO_ROOT / "token.json"
 # Use gmail.send scope (minimal) — gmail.modify already obtained for the watcher,
 # so the existing token.json covers this.
@@ -65,9 +65,13 @@ def _get_gmail_service():
             creds.refresh(Request())
         else:
             if not CREDENTIALS_FILE.exists():
+                print(
+                    "Download OAuth credentials from Google Cloud Console "
+                    "and place credentials.json in the project root.",
+                    file=sys.stderr, flush=True,
+                )
                 raise FileNotFoundError(
-                    f"Credentials file not found: {CREDENTIALS_FILE}\n"
-                    "Download OAuth2 credentials from Google Cloud Console."
+                    f"credentials.json not found at: {CREDENTIALS_FILE}"
                 )
 
             class _WslBrowser(webbrowser.BaseBrowser):

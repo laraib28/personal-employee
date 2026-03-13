@@ -15,7 +15,7 @@ import subprocess
 import webbrowser
 from pathlib import Path
 
-CREDENTIALS_FILE = Path(__file__).parent / "credintials.json.json"
+CREDENTIALS_FILE = Path(__file__).parent / "credentials.json"
 TOKEN_FILE = Path(__file__).parent / "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -69,7 +69,10 @@ def get_gmail_service():
 def main():
     # Verify credentials file exists
     if not CREDENTIALS_FILE.exists():
-        print(f"ERROR: Credentials file not found: {CREDENTIALS_FILE}")
+        print(
+            "Download OAuth credentials from Google Cloud Console "
+            "and place credentials.json in the project root."
+        )
         sys.exit(1)
 
     print(f"Using credentials: {CREDENTIALS_FILE.name}", flush=True)

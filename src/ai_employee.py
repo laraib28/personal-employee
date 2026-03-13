@@ -31,6 +31,8 @@ Architecture:
     │  - Obsidian Vault (task queue & reports)                    │
     │  - Claude API (AI reasoning)                                │
     │  - Git (version control)                                    │
+    │  - Health Monitor (Platinum)                                │
+    │  - Vault Sync (Platinum)                                    │
     └─────────────────────────────────────────────────────────────┘
 """
 
@@ -45,7 +47,9 @@ from typing import Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
-from retry import with_retry
+from retry import with_retry, mask_secrets
+from health_monitor import HealthMonitor
+from vault_sync import VaultSync
 
 # Unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -212,6 +216,14 @@ class AIEmployee:
 
     The AI Employee continuously monitors for new tasks, processes them
     using Claude API, and reports results back to the vault.
+
+    Platinum-tier additions:
+    - HealthMonitor: heartbeat + service status written to health_status.json
+    - VaultSync: file-change detection logged per cycle
+    - Security: secrets masked before any audit-log write
+    - Enhanced Dashboard: live health, uptime, email counters
+    - New event types: email_received, email_processed, approval_requested,
+                       approval_granted, health_heartbeat
     """
 
     def __init__(
@@ -259,6 +271,16 @@ class AIEmployee:
         # Ensure directories exist
         self._setup_directories()
 
+        # Platinum: Health monitor
+        self.health = HealthMonitor(self.logs_path)
+        self.health.set_service_status("ai_employee", "starting")
+
+        # Platinum: Vault sync tracker
+        self.vault_sync = VaultSync(
+            vault_path=self.vault_path,
+            log_fn=self._write_audit_log,
+        )
+
     def _setup_directories(self) -> None:
         """Create required vault directories."""
         for path in [self.needs_action_path, self.pending_approval_path,
@@ -277,34 +299,18 @@ class AIEmployee:
         """
         Append a structured JSON audit entry to /Logs/YYYY-MM-DD.json.
 
-        Each day gets its own log file. Entries are appended to a JSON array.
-        Fields added automatically: logged_at (ISO timestamp).
+        Secrets are automatically masked by retry.write_vault_log before
+        anything is persisted to disk.
         """
-        today = datetime.now().strftime("%Y-%m-%d")
-        log_file = self.logs_path / f"{today}.json"
-
-        entry["logged_at"] = datetime.now().isoformat()
-
-        entries = []
-        if log_file.exists():
-            try:
-                entries = json.loads(log_file.read_text(encoding="utf-8"))
-                if not isinstance(entries, list):
-                    entries = []
-            except (json.JSONDecodeError, ValueError):
-                entries = []
-
-        entries.append(entry)
-        log_file.write_text(json.dumps(entries, indent=2, default=str), encoding="utf-8")
+        from retry import write_vault_log
+        write_vault_log(self.logs_path, entry)
 
     def _regenerate_dashboard(self) -> None:
         """
         Regenerate Dashboard.md with a live summary of the vault state.
 
-        Summarises:
-        - Files currently in /Needs_Action
-        - Files currently in /Pending_Approval
-        - Files completed today (mtime >= today midnight)
+        Platinum additions: health status, uptime, email counter,
+        last heartbeat, service statuses.
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
@@ -325,6 +331,21 @@ class AIEmployee:
 
         ai_status = "Enabled" if self.client else "Disabled (no API key)"
         log_file = self.logs_path / f"{datetime.now().strftime('%Y-%m-%d')}.json"
+
+        # Platinum: pull health data
+        health = self.health.to_dict()
+        uptime = health.get("uptime", "00:00:00")
+        emails_today = health.get("emails_processed_today", 0)
+        error_count = health.get("error_count", 0)
+        last_heartbeat = health.get("heartbeat") or "—"
+        last_email = health.get("last_email") or "—"
+
+        # Service rows for health table
+        services = health.get("services", {})
+        service_rows = "\n".join(
+            f"| {svc} | {status} |"
+            for svc, status in sorted(services.items())
+        ) or "| — | — |"
 
         content = f"""# AI Employee Dashboard
 
@@ -356,6 +377,26 @@ class AIEmployee:
 | AI (Claude) | {ai_status} |
 | Vault Path | `{self.vault_path}` |
 | Log File | `{log_file.name}` |
+| Uptime | {uptime} |
+| Errors | {error_count} |
+
+---
+
+## Email Activity
+
+| Metric | Value |
+|--------|-------|
+| Processed Today | {emails_today} |
+| Last Email | {last_email[:60] if last_email != "—" else "—"} |
+| Last Heartbeat | {last_heartbeat[:19] if last_heartbeat != "—" else "—"} |
+
+---
+
+## Service Status
+
+| Service | Status |
+|---------|--------|
+{service_rows}
 
 ---
 
@@ -386,6 +427,14 @@ class AIEmployee:
             if task:
                 new_tasks.append(task)
                 self.processed_files.add(str(file_path))
+                # Platinum: log email_received for email-sourced tasks
+                if task.metadata.get("source") == "gmail":
+                    self._write_audit_log({
+                        "event":   "email_received",
+                        "task_id": task.id,
+                        "subject": task.metadata.get("subject", ""),
+                        "from":    task.metadata.get("from", ""),
+                    })
 
         return new_tasks
 
@@ -420,6 +469,7 @@ class AIEmployee:
 
         except Exception as e:
             self._log(f"Error parsing {file_path}: {e}", "ERROR")
+            self.health.increment_error()
             return None
 
     def _determine_priority(self, event: str, metadata: dict) -> TaskPriority:
@@ -465,17 +515,36 @@ class AIEmployee:
         self._log(f"  Move to approve: {self.approved_path}/")
         self._log(f"  Delete to reject: remove from {self.pending_approval_path}/")
 
+        # Platinum: log approval_requested
+        self._write_audit_log({
+            "event":    "approval_requested",
+            "task_id":  task.id,
+            "title":    task.title,
+            "filename": filename,
+        })
+
         # Block until approved or rejected
         while True:
             # Check if file appeared in Approved/
             if approved_path.exists():
                 self._log(f"APPROVED: {task.title}", "SUCCESS")
                 task.source_file = approved_path
+                # Platinum: log approval_granted
+                self._write_audit_log({
+                    "event":   "approval_granted",
+                    "task_id": task.id,
+                    "title":   task.title,
+                })
                 return True
 
             # Check if file was deleted from Pending_Approval (rejection)
             if not pending_path.exists():
                 self._log(f"REJECTED: {task.title} (file removed)", "WARN")
+                self._write_audit_log({
+                    "event":   "task_rejected",
+                    "task_id": task.id,
+                    "title":   task.title,
+                })
                 return False
 
             time.sleep(self.approval_poll_interval)
@@ -501,15 +570,26 @@ class AIEmployee:
             task.status = TaskStatus.COMPLETED
             self._log(f"Completed: {task.title}", "SUCCESS")
 
+            # Platinum: log email_processed for email tasks
+            if task.metadata.get("source") == "gmail":
+                self.health.set_last_email(task.metadata.get("subject", task.title))
+                self._write_audit_log({
+                    "event":   "email_processed",
+                    "task_id": task.id,
+                    "subject": task.metadata.get("subject", ""),
+                    "status":  "completed",
+                })
+
         except Exception as e:
             task.error = str(e)
             task.status = TaskStatus.FAILED
             self._log(f"Failed: {task.title} - {e}", "ERROR")
+            self.health.increment_error()
             self._write_audit_log({
-                "event": "task_failed",
-                "task_id": task.id,
-                "title": task.title,
-                "error": str(e),
+                "event":    "task_failed",
+                "task_id":  task.id,
+                "title":    task.title,
+                "error":    str(e),
                 "priority": task.priority.name,
             })
 
@@ -571,20 +651,21 @@ class AIEmployee:
             result = _send()
             self._log(f"Email sent: {to} — {subject}", "SUCCESS")
             self._write_audit_log({
-                "event": "email_sent",
-                "to": to,
+                "event":   "email_sent",
+                "to":      to,
                 "subject": subject,
                 "task_id": task.id,
             })
             return result
         except Exception as e:
             self._log(f"Email failed: {e}", "ERROR")
+            self.health.increment_error()
             self._write_audit_log({
-                "event": "error",
+                "event":   "system_error",
                 "context": "send_email",
-                "to": to,
+                "to":      to,
                 "subject": subject,
-                "error": str(e),
+                "error":   str(e),
             })
             return f"EMAIL FAILED: {e}"
 
@@ -630,6 +711,7 @@ file: {task.metadata.get('file', 'N/A')}
             return response.content[0].text.strip()
 
         except Exception as e:
+            self.health.increment_error()
             return f"AI analysis error: {e}"
 
     # =========================================================================
@@ -645,7 +727,7 @@ file: {task.metadata.get('file', 'N/A')}
         normal process_task / report_task flow.
 
         On success:  log email_sent event, move file to Done/.
-        On failure:  log error event, leave file in Approved/ for retry.
+        On failure:  log system_error event, leave file in Approved/ for retry.
         """
         if not self.approved_path.exists():
             return
@@ -690,9 +772,9 @@ file: {task.metadata.get('file', 'N/A')}
                     _send_approved()
                     self._log(f"Approved email sent to {to}: {subject}", "SUCCESS")
                     self._write_audit_log({
-                        "event": "email_sent",
-                        "to": to,
-                        "subject": subject,
+                        "event":       "email_sent",
+                        "to":          to,
+                        "subject":     subject,
                         "source_file": str(md_file),
                     })
                     dest = self.done_path / (
@@ -704,12 +786,13 @@ file: {task.metadata.get('file', 'N/A')}
 
                 except Exception as e:
                     self._log(f"Approved email failed for {to}: {e}", "ERROR")
+                    self.health.increment_error()
                     self._write_audit_log({
-                        "event": "error",
-                        "context": "approved_email_send",
-                        "to": to,
-                        "subject": subject,
-                        "error": str(e),
+                        "event":       "system_error",
+                        "context":     "approved_email_send",
+                        "to":          to,
+                        "subject":     subject,
+                        "error":       str(e),
                         "source_file": str(md_file),
                     })
                     # Leave file in Approved/ for retry on next cycle
@@ -717,6 +800,7 @@ file: {task.metadata.get('file', 'N/A')}
 
             except Exception as e:
                 self._log(f"Error reading approved file {md_file.name}: {e}", "ERROR")
+                self.health.increment_error()
 
     # =========================================================================
     # REPORT: Log results to Obsidian
@@ -769,14 +853,14 @@ original_file: {task.source_file}
 
         # Write structured audit log entry
         self._write_audit_log({
-            "event": "task_completed",
-            "task_id": task.id,
-            "title": task.title,
-            "status": task.status.value,
-            "priority": task.priority.name,
-            "created_at": task.created_at.isoformat(),
-            "result": task.result,
-            "error": task.error,
+            "event":       "task_completed",
+            "task_id":     task.id,
+            "title":       task.title,
+            "status":      task.status.value,
+            "priority":    task.priority.name,
+            "created_at":  task.created_at.isoformat(),
+            "result":      task.result,
+            "error":       task.error,
             "report_file": str(report_path),
             "source_file": str(task.source_file),
         })
@@ -789,6 +873,9 @@ original_file: {task.source_file}
 
     def run_once(self) -> list[Task]:
         """Run one iteration of task processing."""
+        # Platinum: vault sync check (detect file movements)
+        self.vault_sync.check()
+
         # Scan for new tasks
         new_tasks = self.scan_for_tasks()
 
@@ -805,11 +892,6 @@ original_file: {task.source_file}
                     approved = self._wait_for_approval(task)
                     if not approved:
                         self._log(f"Skipped (rejected): {task.title}")
-                        self._write_audit_log({
-                            "event": "task_rejected",
-                            "task_id": task.id,
-                            "title": task.title,
-                        })
                         continue
 
                 self.process_task(task)
@@ -817,6 +899,12 @@ original_file: {task.source_file}
 
         # Process any human-approved email drafts
         self._process_approved_emails()
+
+        # Platinum: health heartbeat
+        self.health.set_service_status("ai_employee", "running")
+        self.health.heartbeat()
+        self._write_audit_log({"event": "health_heartbeat",
+                                "uptime": self.health.to_dict()["uptime"]})
 
         # Regenerate dashboard on every cycle
         self._regenerate_dashboard()
@@ -833,7 +921,10 @@ original_file: {task.source_file}
         self._log(f"Poll interval: {self.poll_interval}s")
         self._log("=" * 60)
         self._log("Monitoring for tasks... (Ctrl+C to stop)\n")
-        self._write_audit_log({"event": "agent_started", "vault": str(self.vault_path),
+
+        self.health.set_service_status("ai_employee", "running")
+        self._write_audit_log({"event": "agent_started",
+                                "vault": str(self.vault_path),
                                 "ai_enabled": self.client is not None,
                                 "poll_interval": self.poll_interval})
 
@@ -843,6 +934,8 @@ original_file: {task.source_file}
                 time.sleep(self.poll_interval)
 
         except KeyboardInterrupt:
+            self.health.set_service_status("ai_employee", "stopped")
+            self.health.heartbeat()
             self._write_audit_log({"event": "agent_stopped"})
             self._log("\nAI Employee stopped.")
 
@@ -859,6 +952,7 @@ original_file: {task.source_file}
             "pending_approval": len(list(self.pending_approval_path.glob("*.md"))),
             "processed_count": len(self.processed_files),
             "poll_interval": self.poll_interval,
+            "health": self.health.to_dict(),
         }
 
 

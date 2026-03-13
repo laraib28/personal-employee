@@ -57,7 +57,6 @@ tmp/
 # Google OAuth files
 token.json
 credentials.json
-credintials.json.json
 
 # Any JSON credentials
 *credentials*.json
